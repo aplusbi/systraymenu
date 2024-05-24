@@ -1,28 +1,56 @@
 #include <gtk/gtk.h>
 
-void callback(GtkWidget*, gpointer);
-void resize_systray(GtkStatusIcon*, gint, gpointer);
-void on_click(GtkStatusIcon*, gpointer);
-GtkMenu* create_menu();
-GtkWidget* create_menu_item(char*, char*);
-
 typedef struct {
   char* name;
   char* command;
+  gboolean confirm;
 } MenuItem;
 
-static const MenuItem menu_items[] = {
-  { "Lock", "slock" },
-  { "Logout", "pkill dwm" },
-  { "Suspend", "systemctl suspend" },
-  { "Hibernate", "systemctl hibernate" },
-  { "Restart", "systemctl reboot" },
-  { "Shutdown", "sudo -A shutdown -h now" },
+void callback(GtkWidget*, gpointer);
+void callback_dialog(GtkDialog*, gint, gpointer);
+void resize_systray(GtkStatusIcon*, gint, gpointer);
+void on_click(GtkStatusIcon*, gpointer);
+GtkMenu* create_menu();
+GtkWidget* create_menu_item(MenuItem*);
+
+static MenuItem menu_items[] = {
+  { "Lock", "slock", FALSE },
+  { "Logout", "pkill dwm", TRUE },
+  { "Suspend", "systemctl suspend", TRUE },
+  { "Hibernate", "systemctl hibernate", TRUE },
+  { "Restart", "systemctl reboot", TRUE },
+  { "Shutdown", "sudo -A -k shutdown -h now", FALSE },
 };
 
-void callback(GtkWidget* widget, gpointer command) {
-  GError *error = NULL;
-  g_spawn_command_line_async(command, &error);
+void callback(GtkWidget* widget, gpointer data) {
+  MenuItem* menu_item = (MenuItem*)(data);
+  if (menu_item->confirm == TRUE) {
+    GtkWidget* dialog = gtk_message_dialog_new(
+        NULL,
+        GTK_DIALOG_MODAL,
+        GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_OK_CANCEL,
+        "Are you sure you want to %s?",
+        menu_item->name);
+    g_signal_connect(
+        dialog,
+        "response",
+        G_CALLBACK (callback_dialog),
+        menu_item);
+    gtk_dialog_run(GTK_DIALOG (dialog));
+    gtk_widget_destroy(dialog);
+  } else {
+    GError *error = NULL;
+    g_spawn_command_line_async(menu_item->command, &error);
+  }
+}
+
+void callback_dialog(GtkDialog* dialog, gint response_id, gpointer data) {
+  if (response_id == GTK_RESPONSE_OK) {
+    MenuItem* menu_item = (MenuItem*) (data);
+    GError *error = NULL;
+    g_spawn_command_line_async(menu_item->command, &error);
+  }
 }
 
 void resize_systray(GtkStatusIcon* icon, gint _size, gpointer dummy) {
@@ -45,20 +73,20 @@ GtkMenu* create_menu() {
   size_t num_menu_items = sizeof(menu_items) / sizeof(MenuItem);
   for (int i = 0; i < num_menu_items; ++i) {
     GtkWidget *menu_item =
-      create_menu_item(menu_items[i].name, menu_items[i].command);
+      create_menu_item(&menu_items[i]);
     gtk_menu_shell_append(GTK_MENU_SHELL (menu), menu_item);
   }
 
   return menu;
 }
 
-GtkWidget* create_menu_item(char* name, char* command) {
-  GtkWidget *menu_item = gtk_menu_item_new_with_label(name);
+GtkWidget* create_menu_item(MenuItem* menu_info) {
+  GtkWidget *menu_item = gtk_menu_item_new_with_label(menu_info->name);
   g_signal_connect(
       G_OBJECT (menu_item),
       "activate",
       G_CALLBACK (callback),
-      command);
+      menu_info);
   gtk_widget_show(menu_item);
 
   return menu_item;
